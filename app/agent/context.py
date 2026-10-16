@@ -8,7 +8,7 @@ Context 用来保存一次图执行过程中不参与状态合并的外部依赖
 这样节点可以通过 runtime.context 复用外部工具，而不需要把连接类对象塞进 State
 """
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from langchain_huggingface import HuggingFaceEndpointEmbeddings
 
@@ -17,6 +17,7 @@ from app.repositories.mysql.dw.dw_mysql_repository import DWMySQLRepository
 from app.repositories.mysql.meta.meta_mysql_repository import MetaMySQLRepository
 from app.repositories.qdrant.column_qdrant_repository import ColumnQdrantRepository
 from app.repositories.qdrant.metric_qdrant_repository import MetricQdrantRepository
+from app.services.semantic_cache_service import SemanticCacheService
 
 
 class DataAgentContext(TypedDict):
@@ -34,3 +35,4 @@ class DataAgentContext(TypedDict):
     meta_mysql_repository: MetaMySQLRepository
     # 数仓仓储，负责在额外上下文补全时读取数据库方言 版本等执行环境信息
     dw_mysql_repository: DWMySQLRepository
+    semantic_cache_service: NotRequired[SemanticCacheService]

@@ -10,10 +10,10 @@ SQL 生成闭环会继续写入候选 SQL 以及校验错误信息，用于控�
 from typing import NotRequired, TypedDict
 
 from app.entities.column_info import ColumnInfo
-from app.entities.metric_info import MetricInfo
-from app.entities.value_info import ValueInfo
 from app.entities.conversation import SuccessfulTurn
+from app.entities.metric_info import MetricInfo
 from app.entities.query_rewrite import QueryRewriteResult
+from app.entities.value_info import ValueInfo
 
 
 class MetricInfoState(TypedDict):
@@ -53,7 +53,6 @@ class DateInfoState(TypedDict):
     date: str
     weekday: str
     quarter: str
-    
 
 
 class DBInfoState(TypedDict):
@@ -65,9 +64,10 @@ class DBInfoState(TypedDict):
 
 class DataAgentState(TypedDict):
     """一次问数链路中的核心状态"""
+
     session_id: str  # 本轮问题所属的会话编号
-    raw_query: str   # 用户本轮的原始输入
-    query: str       # 交给后续问数节点处理的问题
+    raw_query: str  # 用户本轮的原始输入
+    query: str  # 交给后续问数节点处理的问题
     history: list[SuccessfulTurn]  # 本轮可参考的成功历史
     rewrite_result: NotRequired[QueryRewriteResult]  # 问题理解节点完成后写入的结果
     keywords: list[str]  # 抽取的关键词
@@ -82,5 +82,11 @@ class DataAgentState(TypedDict):
 
     sql: str  # 生成或校正后的SQL
     query_succeeded: bool  # 本轮 SQL 是否执行成功
+
+    # TypedDict 不支持字段默认值，由查询入口初始化，缓存节点每轮重新赋值。
+    is_cache_hit: NotRequired[bool]  # 默认 False
+    cached_sql: NotRequired[str | None]  # 默认 None
+    cache_meta: NotRequired[dict | None]
+    cache_validation_failed: NotRequired[bool]
 
     error: str  # 校验SQL时出现的错误信息

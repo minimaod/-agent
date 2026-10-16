@@ -25,6 +25,7 @@ from app.repositories.mysql.meta.meta_mysql_repository import MetaMySQLRepositor
 from app.repositories.qdrant.column_qdrant_repository import ColumnQdrantRepository
 from app.repositories.qdrant.metric_qdrant_repository import MetricQdrantRepository
 from app.services.query_service import QueryService
+from app.services.semantic_cache_service import SemanticCacheService
 
 
 async def get_meta_session():
@@ -82,6 +83,15 @@ async def get_value_es_repository() -> ValueESRepository:
     return ValueESRepository(es_client_manager.client)
 
 
+async def get_semantic_cache_service(
+    embedding_client: Annotated[
+        HuggingFaceEndpointEmbeddings, Depends(get_embedding_client)
+    ],
+) -> SemanticCacheService:
+    """缓存复用应用级 Qdrant 与 Embedding 客户端。"""
+    return SemanticCacheService(qdrant_client_manager.client, embedding_client)
+
+
 async def get_query_service(
     meta_mysql_repository: Annotated[
         MetaMySQLRepository, Depends(get_meta_mysql_repository)
@@ -97,6 +107,9 @@ async def get_query_service(
         MetricQdrantRepository, Depends(get_metric_qdrant_repository)
     ],
     value_es_repository: Annotated[ValueESRepository, Depends(get_value_es_repository)],
+    semantic_cache_service: Annotated[
+        SemanticCacheService, Depends(get_semantic_cache_service)
+    ],
 ) -> QueryService:
     """组装一次查询所需的业务服务"""
 
@@ -108,4 +121,5 @@ async def get_query_service(
         column_qdrant_repository=column_qdrant_repository,
         metric_qdrant_repository=metric_qdrant_repository,
         value_es_repository=value_es_repository,
+        semantic_cache_service=semantic_cache_service,
     )

@@ -32,12 +32,30 @@ async def validate_sql(state: DataAgentState, runtime: Runtime[DataAgentContext]
             await dw_mysql_repository.validate(sql)
             writer({"type": "progress", "step": step, "status": "success"})
             logger.info("SQL语法正确")
-            return {"error": None}
+            return {"error": None, "cache_validation_failed": False}
         except Exception as e:
             # 不抛出异常中断图执行，而是把错误写入状态，供条件分支进入 correct_sql
             logger.info(f"SQL语法错误：{str(e)}")
+            if state.get("is_cache_hit", False):
+                logger.warning("缓存 SQL 校验失败，退回完整检索与生成链路")
+                writer({"type": "progress", "step": step, "status": "error"})
+                writer(
+                    {
+                        "type": "progress",
+                        "step": "cache_fallback",
+                        "status": "success",
+                        "message": "缓存 SQL 校验失败，重新检索并生成 SQL...",
+                    }
+                )
+                return {
+                    "error": str(e),
+                    "is_cache_hit": False,
+                    "cached_sql": None,
+                    "cache_meta": None,
+                    "cache_validation_failed": True,
+                }
             writer({"type": "progress", "step": step, "status": "success"})
-            return {"error": str(e)}
+            return {"error": str(e), "cache_validation_failed": False}
 
     except Exception as e:
         logger.error(f"{step} failed: {e}")

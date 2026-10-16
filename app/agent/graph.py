@@ -3,8 +3,9 @@
 
 使用 LangGraph 把问数智能体的各个节点串成一条可观测的执行链路
 当前链路已经落地关键词抽取和多路召回，字段和指标走 Qdrant 向量检索，字段取值走 ES 全文检索
-整体流程先抽取用户问题关键词，再并行召回字段 字段取值和指标信息，
-随后合并召回结果 过滤候选表和指标 补充额外上下文，最后生成 校验 修正并执行 SQL
+先改写完整问题并检查语义缓存；命中后直接校验并执行 SQL。
+未命中则抽取关键词，并行召回字段、字段取值和指标，合并、过滤、补齐上下文后生成 SQL。
+缓存 SQL 校验失败会回到完整链路，普通 SQL 校验失败则按原有逻辑校正一次。
 """
 
 import asyncio
@@ -14,6 +15,7 @@ from langgraph.graph import StateGraph
 
 from app.agent.context import DataAgentContext
 from app.agent.nodes.add_extra_context import add_extra_context
+from app.agent.nodes.check_semantic_cache import check_semantic_cache
 from app.agent.nodes.correct_sql import correct_sql
 from app.agent.nodes.extract_keywords import extract_keywords
 from app.agent.nodes.filter_metric import filter_metric
@@ -40,6 +42,7 @@ from app.repositories.mysql.dw.dw_mysql_repository import DWMySQLRepository
 from app.repositories.mysql.meta.meta_mysql_repository import MetaMySQLRepository
 from app.repositories.qdrant.column_qdrant_repository import ColumnQdrantRepository
 from app.repositories.qdrant.metric_qdrant_repository import MetricQdrantRepository
+from app.services.semantic_cache_service import SemanticCacheService
 
 
 def route_after_rewrite(state: DataAgentState) -> str:
@@ -52,11 +55,19 @@ def route_after_rewrite(state: DataAgentState) -> str:
     return "reply_only"
 
 
+def route_after_validation(state: DataAgentState) -> str:
+    """过期缓存缺少校正所需的上下文，须回到完整检索链路。"""
+    if state.get("cache_validation_failed", False):
+        return "extract_keywords"
+    return "run_sql" if state["error"] is None else "correct_sql"
+
+
 # StateGraph 声明整张图使用的状态结构和运行时上下文结构
 graph_builder = StateGraph(state_schema=DataAgentState, context_schema=DataAgentContext)
 
 # 注册节点：每个节点负责问数链路中的一个清晰步骤
 graph_builder.add_node("rewrite_query", rewrite_query)
+graph_builder.add_node("check_semantic_cache", check_semantic_cache)
 graph_builder.add_node("respond_query", respond_query)
 graph_builder.add_node("extract_keywords", extract_keywords)
 graph_builder.add_node("recall_column", recall_column)
@@ -78,9 +89,15 @@ graph_builder.add_conditional_edges(
     source="rewrite_query",
     path=route_after_rewrite,
     path_map={
-        "continue_query": "extract_keywords",
+        "continue_query": "check_semantic_cache",
         "reply_only": "respond_query",
     },
+)
+
+graph_builder.add_conditional_edges(
+    source="check_semantic_cache",
+    path=lambda state: "hit" if state.get("is_cache_hit", False) else "miss",
+    path_map={"hit": "validate_sql", "miss": "extract_keywords"},
 )
 
 # 澄清或范围提示发送后，结束本轮
@@ -109,8 +126,12 @@ graph_builder.add_edge("generate_sql", "validate_sql")
 # SQL 校验通过就直接执行，校验失败则先进入修正节点
 graph_builder.add_conditional_edges(
     source="validate_sql",
-    path=lambda state: "run_sql" if state["error"] is None else "correct_sql",
-    path_map={"run_sql": "run_sql", "correct_sql": "correct_sql"},
+    path=route_after_validation,
+    path_map={
+        "run_sql": "run_sql",
+        "correct_sql": "correct_sql",
+        "extract_keywords": "extract_keywords",
+    },
 )
 graph_builder.add_edge("correct_sql", "run_sql")
 graph_builder.add_edge("run_sql", END)
@@ -157,6 +178,9 @@ if __name__ == "__main__":
                 query=raw_query,
                 history=[],
                 query_succeeded=False,
+                is_cache_hit=False,
+                cached_sql=None,
+                cache_validation_failed=False,
             )
             context = DataAgentContext(
                 column_qdrant_repository=column_qdrant_repository,
@@ -165,6 +189,9 @@ if __name__ == "__main__":
                 value_es_repository=value_es_repository,
                 meta_mysql_repository=meta_mysql_repository,
                 dw_mysql_repository=dw_mysql_repository,
+                semantic_cache_service=SemanticCacheService(
+                    qdrant_client_manager.client, embedding_client_manager.client
+                ),
             )
 
             # stream_mode="custom" 会接收各节点通过 runtime.stream_writer 写出的进度信息

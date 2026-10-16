@@ -44,6 +44,8 @@ speed-measure-plugin*.json
 .history/*
 
 # Misc (build / logs)
+/logs/
+jieba.cache
 /.sass-cache
 /connect.lock
 /coverage
