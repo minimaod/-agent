@@ -4,6 +4,11 @@
  */
 export type ProgressStatus = "running" | "success" | "error";
 
+export type SessionEvent = {
+  type: "session";
+  session_id: string;
+};
+
 export type ProgressEvent = {
   type: "progress";
   step: string;
@@ -15,12 +20,18 @@ export type ResultEvent = {
   data: unknown;
 };
 
+export type ReplyEvent = {
+  type: "message";
+  intent: "clarify" | "out_of_scope";
+  message: string;
+};
+
 export type ErrorEvent = {
   type: "error";
   message: string;
 };
 
-export type AgentEvent = ProgressEvent | ResultEvent | ErrorEvent;
+export type AgentEvent = SessionEvent | ProgressEvent | ResultEvent | ReplyEvent | ErrorEvent;
 
 export type StepState = {
   step: string;

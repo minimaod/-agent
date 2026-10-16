@@ -7,12 +7,13 @@ State 是 LangGraph 各节点之间传递和更新的共享数据
 SQL 生成闭环会继续写入候选 SQL 以及校验错误信息，用于控制校正或执行分支
 """
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from app.entities.column_info import ColumnInfo
 from app.entities.metric_info import MetricInfo
 from app.entities.value_info import ValueInfo
 from app.entities.conversation import SuccessfulTurn
+from app.entities.query_rewrite import QueryRewriteResult
 
 
 class MetricInfoState(TypedDict):
@@ -68,6 +69,7 @@ class DataAgentState(TypedDict):
     raw_query: str   # 用户本轮的原始输入
     query: str       # 交给后续问数节点处理的问题
     history: list[SuccessfulTurn]  # 本轮可参考的成功历史
+    rewrite_result: NotRequired[QueryRewriteResult]  # 问题理解节点完成后写入的结果
     keywords: list[str]  # 抽取的关键词
     retrieved_column_infos: list[ColumnInfo]  # 检索到的字段信息
     retrieved_metric_infos: list[MetricInfo]  # 检索到的指标信息

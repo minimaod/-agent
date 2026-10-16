@@ -66,8 +66,13 @@ class QueryService:
             meta_mysql_repository=self.meta_mysql_repository,
             dw_mysql_repository=self.dw_mysql_repository,
         )
+        understanding_completed = False
         try:
+            # 先告知客户端本轮使用的会话编号
+            session_event = {"type": "session", "session_id": session_id}
+            yield f"data: {json.dumps(session_event, ensure_ascii=False)}\n\n"
             final_state = None
+            new_topic_started = False
             # 同时接收节点消息和内部 State，保留最后一份状态供成功记录使用
             async for mode, chunk in graph.astream(
                 input=state,
@@ -78,6 +83,18 @@ class QueryService:
                     yield f"data: {json.dumps(chunk, ensure_ascii=False, default=str)}\n\n"
                 elif mode == "values":
                     final_state = chunk
+                    rewrite_result = chunk.get("rewrite_result")
+
+                    if rewrite_result is not None:
+                        understanding_completed = True
+
+                    if (
+                        not new_topic_started
+                        and rewrite_result is not None
+                        and rewrite_result.intent == "new_topic"
+                    ):
+                        conversation_memory_store.start_new_topic(session_id)
+                        new_topic_started = True
 
             if final_state is not None and final_state.get("query_succeeded", False):
                 turn = SuccessfulTurn(
@@ -90,3 +107,6 @@ class QueryService:
             # 流式接口已经开始返回后不能再改 HTTP 状态码，因此把异常也包装成一条 SSE 消息
             error = {"type": "error", "message": str(e)}
             yield f"data: {json.dumps(error, ensure_ascii=False, default=str)}\n\n"
+        finally:
+            if not understanding_completed:
+                conversation_memory_store.start_new_topic(session_id)

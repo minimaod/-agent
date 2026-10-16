@@ -7,6 +7,7 @@ import type { AgentEvent } from "../types/agent";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
 
 type QueryOptions = {
+  sessionId?: string | null;
   signal?: AbortSignal;
   onEvent: (event: AgentEvent) => void;
 };
@@ -18,7 +19,10 @@ export async function streamQuery(query: string, options: QueryOptions) {
       "Content-Type": "application/json",
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({
+      query,
+      session_id: options.sessionId,
+    }),
     signal: options.signal,
   });
 

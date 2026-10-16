@@ -23,6 +23,8 @@ from app.agent.nodes.merge_retrieved_info import merge_retrieved_info
 from app.agent.nodes.recall_column import recall_column
 from app.agent.nodes.recall_metric import recall_metric
 from app.agent.nodes.recall_value import recall_value
+from app.agent.nodes.respond_query import respond_query
+from app.agent.nodes.rewrite_query import rewrite_query
 from app.agent.nodes.run_sql import run_sql
 from app.agent.nodes.validate_sql import validate_sql
 from app.agent.state import DataAgentState
@@ -39,10 +41,23 @@ from app.repositories.mysql.meta.meta_mysql_repository import MetaMySQLRepositor
 from app.repositories.qdrant.column_qdrant_repository import ColumnQdrantRepository
 from app.repositories.qdrant.metric_qdrant_repository import MetricQdrantRepository
 
+
+def route_after_rewrite(state: DataAgentState) -> str:
+    """根据问题理解结果，选择继续问数或仅回复消息。"""
+    intent = state["rewrite_result"].intent
+
+    if intent in ("follow_up", "new_topic"):
+        return "continue_query"
+
+    return "reply_only"
+
+
 # StateGraph 声明整张图使用的状态结构和运行时上下文结构
 graph_builder = StateGraph(state_schema=DataAgentState, context_schema=DataAgentContext)
 
 # 注册节点：每个节点负责问数链路中的一个清晰步骤
+graph_builder.add_node("rewrite_query", rewrite_query)
+graph_builder.add_node("respond_query", respond_query)
 graph_builder.add_node("extract_keywords", extract_keywords)
 graph_builder.add_node("recall_column", recall_column)
 graph_builder.add_node("recall_value", recall_value)
@@ -56,8 +71,20 @@ graph_builder.add_node("validate_sql", validate_sql)
 graph_builder.add_node("correct_sql", correct_sql)
 graph_builder.add_node("run_sql", run_sql)
 
-# 从用户问题开始，先抽取关键词作为后续检索的基础
-graph_builder.add_edge(START, "extract_keywords")
+# 每轮先理解问题，再根据意图选择后续路径
+graph_builder.add_edge(START, "rewrite_query")
+
+graph_builder.add_conditional_edges(
+    source="rewrite_query",
+    path=route_after_rewrite,
+    path_map={
+        "continue_query": "extract_keywords",
+        "reply_only": "respond_query",
+    },
+)
+
+# 澄清或范围提示发送后，结束本轮
+graph_builder.add_edge("respond_query", END)
 
 # 关键词抽取后并行进入三类召回，分别面向字段 字段值和业务指标
 graph_builder.add_edge("extract_keywords", "recall_column")
@@ -122,8 +149,15 @@ if __name__ == "__main__":
             )
             value_es_repository = ValueESRepository(es_client_manager.client)
 
-            # 当前只需要传入原始问题，后续节点会逐步写回召回、过滤和额外上下文结果
-            state = DataAgentState(query="统计华北地区的销售总额")
+            # 调试入口也要提供改写节点需要的原话和历史
+            raw_query = "统计华北地区的销售总额"
+            state = DataAgentState(
+                session_id="local-debug",
+                raw_query=raw_query,
+                query=raw_query,
+                history=[],
+                query_succeeded=False,
+            )
             context = DataAgentContext(
                 column_qdrant_repository=column_qdrant_repository,
                 embedding_client=embedding_client_manager.client,

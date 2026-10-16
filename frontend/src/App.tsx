@@ -46,6 +46,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [activeController, setActiveController] = useState<AbortController | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const isStreaming = Boolean(activeController);
@@ -90,6 +91,11 @@ export default function App() {
     setMessages((current) => [...current, userMessage, assistantMessage]);
 
     const onEvent = (event: AgentEvent) => {
+      if (event.type === "session") {
+        sessionIdRef.current = event.session_id;
+        return;
+      }
+
       setMessages((current) =>
         current.map((message) => {
           if (message.id !== assistantId) return message;
@@ -111,6 +117,14 @@ export default function App() {
             };
           }
 
+          if (event.type === "message") {
+            return {
+              ...message,
+              status: "done",
+              content: event.message,
+            };
+          }
+
           return {
             ...message,
             status: "error",
@@ -122,7 +136,11 @@ export default function App() {
     };
 
     try {
-      await streamQuery(query, { signal: controller.signal, onEvent });
+      await streamQuery(query, {
+        sessionId: sessionIdRef.current,
+        signal: controller.signal,
+        onEvent,
+      });
       setMessages((current) =>
         current.map((message) =>
           message.id === assistantId && message.status === "streaming"
@@ -155,6 +173,7 @@ export default function App() {
 
   const clearConversation = () => {
     if (isStreaming) return;
+    sessionIdRef.current = null;
     setMessages([]);
     setDraft("");
   };
